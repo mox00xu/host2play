@@ -1,0 +1,14 @@
+{
+  "name": "autorenew-host2play",
+  "type": "module",
+  "scripts": {
+    "renew": "bun run scripts/host2play-renew.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "playwright": "^1.42.0"
+  }
+}
