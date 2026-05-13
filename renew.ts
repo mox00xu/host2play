@@ -79,24 +79,59 @@ async function main() {
   try {
     log("INFO", "🔐 正在登录...", { email: maskEmail(EMAIL) });
     await gotoWithRetry(page, "https://host2play.gratis/sign-in");
-    await delay(3000);
+    await delay(2000);
 
     log("INFO", "🔍 等待登录表单加载...");
     try {
-      await page.waitForSelector('input[type="email"]', { state: "visible", timeout: 60000 });
+      await page.waitForSelector('input#loginEmail, input[type="email"]', { state: "visible", timeout: 60000 });
     } catch (e) {
       const title = await page.title();
       log("ERROR", "❌ 表单未找到", { title, url: page.url() });
       throw e;
     }
 
-    await page.fill('input[type="email"]', EMAIL);
-    await page.fill('input[type="password"]', PASSWORD);
-    await page.click('button[type="submit"]');
-    log("INFO", "✅ 登录请求已发送");
+    // 填写表单
+    const emailInput = page.locator('input#loginEmail, input[type="email"]').first();
+    const passwordInput = page.locator('input#loginPassword, input[type="password"]').first();
+    await emailInput.fill(EMAIL);
+    await passwordInput.fill(PASSWORD);
+    log("INFO", "✅ 已填写表单，点击登录...");
 
-    await page.waitForURL("**/panel/**", { timeout: 30000 });
-    log("SUCCESS", "✅ 登录成功");
+    // 点击提交按钮并同时监听登录响应
+    const [signInResp] = await Promise.all([
+      page.waitForResponse(
+        (resp) => resp.url().includes("/sign-in") && resp.request().method() === "POST",
+        { timeout: 15000 }
+      ).catch((e) => null),
+      page.click('button#loginBtn, button[type="submit"]'),
+    ]);
+
+    // 检查登录响应
+    if (signInResp) {
+      try {
+        const data = await signInResp.json();
+        log("INFO", "🔍 登录响应", { success: data.success, message: data.message });
+        if (data.success !== 1 && data.success !== true) {
+          throw new Error(`登录失败: ${data.message || "未知错误"}`);
+        }
+        log("SUCCESS", "✅ 登录成功");
+      } catch (e: any) {
+        if (e.message?.includes("登录失败")) throw e;
+        // 响应不是 JSON，继续检查 URL
+      }
+    }
+
+    // 等待跳转到 panel（SPA 可能在 POST 成功后 reload）
+    await page.waitForURL("**/panel**", { timeout: 20000 }).catch(() => {
+      log("WARN", "⚠️ 未检测到 URL 跳转，尝试直接访问面板...");
+    });
+
+    // 确保当前在面板页
+    if (!page.url().includes("/panel")) {
+      log("INFO", "⚠️ 直接导航到面板页");
+      await page.goto("https://host2play.gratis/panel/minecraft", { waitUntil: "domcontentloaded", timeout: 15000 });
+      await delay(2000);
+    }
 
     await gotoWithRetry(page, RENEW_URL);
     await delay(3000);
