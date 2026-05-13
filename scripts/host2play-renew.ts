@@ -9,6 +9,19 @@ async function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function gotoWithRetry(page: any, url: string, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await page.goto(url, { waitUntil: "load", timeout: 60000 });
+      return;
+    } catch (e: any) {
+      if (i === retries - 1) throw e;
+      log("WARN", `⚠️ 第 ${i + 1} 次加载失败，重试...`, { error: e.message.split("\n")[0] });
+      await delay(3000);
+    }
+  }
+}
+
 async function main() {
   log("INFO", "🚀 启动浏览器...");
   const browser = await chromium.launch({ headless: true });
@@ -17,7 +30,7 @@ async function main() {
   try {
     // 1. 登录
     log("INFO", "🔐 正在登录...", { email: maskEmail(EMAIL) });
-    await page.goto("https://host2play.gratis/sign-in", { waitUntil: "networkidle" });
+    await gotoWithRetry(page, "https://host2play.gratis/sign-in");
     await delay(2000);
 
     await page.fill('input[type="email"]', EMAIL);
@@ -26,11 +39,11 @@ async function main() {
     log("INFO", "✅ 登录请求已发送");
 
     // 2. 等待登录完成
-    await page.waitForURL("**/panel/**", { timeout: 15000 });
+    await page.waitForURL("**/panel/**", { timeout: 30000 });
     log("SUCCESS", "✅ 登录成功");
 
     // 3. 前往 Minecraft 页面
-    await page.goto(RENEW_URL, { waitUntil: "networkidle" });
+    await gotoWithRetry(page, RENEW_URL);
     await delay(3000);
 
     // 4. 点击 Renew
