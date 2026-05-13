@@ -209,22 +209,49 @@ async function isRecaptchaSolved(page: Page): Promise<boolean> {
   }
 }
 
-// 检测 IP 是否被封锁
+// 检测 IP 是否被封锁（增强版）
 async function isBlocked(page: Page): Promise<boolean> {
   try {
     const frames = page.frames();
     for (const frame of frames) {
       if (frame.url().includes("recaptcha")) {
         const blocked = await frame.evaluate(() => {
+          // 检测多种 IP 封锁标志
           const header = document.querySelector(".rc-doscaptcha-header-text");
-          if (header && header.textContent?.toLowerCase().includes("try again later")) return true;
+          if (header && header.textContent?.toLowerCase().includes("try again later")) {
+            return true;
+          }
+          
+          // 检测错误消息
           const errorMsg = document.querySelector(".rc-audiochallenge-error-message");
-          if (errorMsg && (errorMsg as HTMLElement).offsetParent !== null) return true;
+          if (errorMsg && (errorMsg as HTMLElement).offsetParent !== null) {
+            const text = errorMsg.textContent?.toLowerCase() || "";
+            if (text.includes("try again later") || text.includes("multiple") || text.includes("blocked")) {
+              return true;
+            }
+          }
+          
+          // 检测图片验证码（通常意味着音频被封锁）
+          const imageChallenge = document.querySelector(".rc-imageselect");
+          if (imageChallenge && (imageChallenge as HTMLElement).offsetParent !== null) {
+            // 图片验证码本身不算 IP 封锁，但可能意味着音频不可用
+            return false;
+          }
+          
           return false;
         }).catch(() => false);
         if (blocked) return true;
       }
     }
+    
+    // 检测页面级别的封锁
+    const pageContent = await page.content();
+    if (pageContent.includes("Your IP has been blocked") || 
+        pageContent.includes("Access denied") ||
+        pageContent.includes("Too many requests")) {
+      return true;
+    }
+    
     return false;
   } catch {
     return false;
@@ -468,7 +495,8 @@ async function solveRecaptcha(page: Page, maxAttempts = 3): Promise<boolean> {
     // IP 被封锁？
     if (await isBlocked(page)) {
       log("ERROR", "❌ IP 被 Google 封锁，需要更换 IP");
-      return false;
+      log("ERROR", "Exit Code 88: IP 被风控，触发 IP 轮换机制");
+      process.exit(88); // 特殊退出码，触发 IP 轮换
     }
 
     // 第一次尝试：点击 checkbox
@@ -903,6 +931,14 @@ async function main() {
       const solved = await solveRecaptcha(page, 3);
       if (!solved) {
         await saveScreenshot(page, "recaptcha-failed");
+        
+        // 检查是否是 IP 封锁导致的失败
+        if (await isBlocked(page)) {
+          log("ERROR", "❌ IP 被 Google 封锁");
+          log("ERROR", "Exit Code 88: 触发 IP 轮换");
+          process.exit(88);
+        }
+        
         throw new Error("reCAPTCHA 处理失败，可能需要手动处理或更换 IP");
       }
       await delay(3000);
@@ -947,6 +983,13 @@ async function main() {
 
   } catch (e: any) {
     log("ERROR", "❌ 执行出错", { error: e.message });
+    
+    // 如果错误消息包含 IP 封锁相关内容，返回 88
+    if (e.message?.includes("IP") || e.message?.includes("blocked") || e.message?.includes("封锁")) {
+      log("ERROR", "检测到 IP 相关错误，可能需要轮换 IP");
+      process.exit(88);
+    }
+    
     throw e;
   } finally {
     if (browser) {
