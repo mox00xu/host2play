@@ -136,8 +136,32 @@ async function main() {
     await gotoWithRetry(page, RENEW_URL);
     await delay(3000);
 
+    log("INFO", "🔍 检查页面内容...");
+    const pageText = await page.textContent("body").catch(() => "");
+    log("INFO", "页面包含 Renew", { hasRenew: pageText.includes("Renew") });
+
+    // 查找 Renew 按钮，支持更多 selector
     log("INFO", "🔄 尝试续期...");
-    const renewBtn = page.locator('button:has-text("Renew"), a:has-text("Renew")').first();
+    const renewBtn = page.locator(
+      'button:has-text("Renew"), a:has-text("Renew"), .btn:has-text("Renew"), [class*="renew"]:has-text("Renew")'
+    ).first();
+    
+    // 先等待按钮出现，超时后截图诊断
+    try {
+      await renewBtn.waitFor({ state: "visible", timeout: 15000 });
+    } catch (e) {
+      log("WARN", "⚠️ Renew 按钮未找到，截图诊断...");
+      await page.screenshot({ path: "/tmp/renew-debug.png" }).catch(() => {});
+      const html = await page.content();
+      log("ERROR", "❌ 页面内容摘要", { 
+        url: page.url(), 
+        title: await page.title().catch(() => ""),
+        hasRenew: html.includes("Renew"),
+        bodyLength: html.length,
+      });
+      throw new Error("Renew 按钮未找到");
+    }
+    
     await renewBtn.click();
     log("INFO", "✅ 已点击 Renew");
 
