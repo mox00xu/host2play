@@ -1,0 +1,33 @@
+name: Host2Play Autorenew
+
+on:
+  schedule:
+    # 每 6 小时运行一次（留 1 小时余量应对 7 小时停止周期）
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    # 手动触发
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Playwright
+        run: |
+          bun add playwright
+          bunx playwright install chromium --with-deps
+
+      - name: Run renew script
+        env:
+          HOST2PLAY_EMAIL: ${{ secrets.HOST2PLAY_EMAIL }}
+          HOST2PLAY_PASSWORD: ${{ secrets.HOST2PLAY_PASSWORD }}
+        run: bun run scripts/host2play-renew.ts
